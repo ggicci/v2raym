@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+V2RAY_BIN="/opt/v2ray/v2ray"
+V2RAY_CONFIG="${HOME}/.config/v2ray/config.json"
+V2RAY_HTTP_PROXY_PORT=1086
+V2RAY_PROXY_PORT=1080
+
+is_darwin() { [[ "$( uname -s | tr '[:upper:]' '[:lower:]' )" == "darwin" ]]; }
+
+stop_v2ray() {
+  echo "stop v2ray service"
+
+  local found
+  found="$( ps aux | pgrep "./v2ray -config" 2>/dev/null | grep -v "grep" || : )"
+
+  if [[ -z "${found}" ]]; then
+    return
+  fi
+
+  echo "${found}" | awk '{print $2}' | xargs kill
+}
+
+start_v2ray() {
+  echo "start v2ray service"
+  cd /opt/v2ray
+  nohup "${V2RAY_BIN}" -config "${V2RAY_CONFIG}" >/tmp/v2ray.log 2>&1 &
+}
+
+enable_osx_wifi_proxies() {
+  echo "[OSX] enable system proxies for network service: Wi-Fi"
+
+  networksetup -setwebproxy Wi-Fi 127.0.0.1 ${V2RAY_HTTP_PROXY_PORT}
+  networksetup -setsecurewebproxy Wi-Fi 127.0.0.1 ${V2RAY_HTTP_PROXY_PORT}
+  networksetup -setftpproxy Wi-Fi 127.0.0.1 ${V2RAY_HTTP_PROXY_PORT}
+  networksetup -setsocksfirewallproxy Wi-Fi 127.0.0.1 ${V2RAY_PROXY_PORT}
+}
+
+disable_osx_wifi_proxies() {
+  echo "[OSX] disable system proxies for network service: Wi-Fi"
+
+  networksetup -setwebproxystate Wi-Fi off
+  networksetup -setsecurewebproxystate Wi-Fi off
+  networksetup -setftpproxystate Wi-Fi off
+  networksetup -setsocksfirewallproxystate Wi-Fi off
+}
+
+enable_system_proxies() {
+  if is_darwin; then
+    enable_osx_wifi_proxies
+  fi
+}
+
+disable_system_proxies() {
+  if is_darwin; then
+    disable_osx_wifi_proxies
+  fi
+}
+
+usage() {
+  echo "
+  Usage: $( basename "$0" ) start | stop
+"
+}
+
+v2raym::stop() {
+  stop_v2ray
+  disable_system_proxies
+}
+
+v2raym::start() {
+  stop_v2ray
+  start_v2ray
+  enable_system_proxies
+
+  sleep 0.5
+  echo -e "\n\n[TAIL LOG]"
+  tail /tmp/v2ray.log
+}
+
+main() {
+  local command="${1:-notset}"
+
+  case "${command}" in
+    start)
+      v2raym::start
+      ;;
+
+    stop)
+      v2raym::stop
+      ;;
+
+    * )
+      usage
+      exit 1
+  esac
+}
+
+main "$@"
